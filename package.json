@@ -1,0 +1,44 @@
+{
+  "name": "open-academy",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "wrangler d1 execute open-academy-db --local --file=src/server/schema.sql && concurrently -n ui,api -c cyan,green \"vite\" \"wrangler dev --port 8791\"",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@clawnify/app": "^0.4.5",
+    "@clawnify/db": "^0.4.3",
+    "@clawnify/queue": "^0.1.2",
+    "@clawnify/services": "^0.6.0",
+    "@radix-ui/react-dialog": "^1.2.0",
+    "@radix-ui/react-popover": "^1.2.0",
+    "@radix-ui/react-tooltip": "^1.3.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "cmdk": "^1.1.1",
+    "hono": "^4.13.13",
+    "lucide-react": "^1.54.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router-dom": "^7.18.4",
+    "tailwindcss": "^4.3.3",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261009.1",
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "concurrently": "^10.0.6",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.3",
+    "wrangler": "^4.149.0"
+  }
+}

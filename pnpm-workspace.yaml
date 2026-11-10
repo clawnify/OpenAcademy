@@ -1,0 +1,9 @@
+verifyDepsBeforeRun: false
+onlyBuiltDependencies:
+  - esbuild
+  - workerd
+allowBuilds:
+  esbuild: true
+  workerd: true
+minimumReleaseAgeExclude:
+  - '@clawnify/services@0.6.0'

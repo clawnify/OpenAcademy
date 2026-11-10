@@ -1,0 +1,20 @@
+name = "open-academy"
+main = "src/server/index.ts"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+# The learner pages are rendered by the Worker, outside /api.
+run_worker_first = ["/api/*", "/learn/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "open-academy-db"
+database_id = "local"
+
+[[r2_buckets]]
+binding = "UPLOADS"
+bucket_name = "open-academy-uploads"
