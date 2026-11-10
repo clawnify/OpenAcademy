@@ -232,17 +232,15 @@ export async function publishCourse(courseId: string, opts: { notes?: string; by
   // "The procedure changed, everyone retakes it": completed people get a fresh assignment now.
   let retrained = 0;
   if (opts.retrain) {
-    const done = await query<{ id: string; learner_id: string }>(
-      `SELECT e.id, e.learner_id FROM enrollments e
-        WHERE e.course_id = ? AND e.status = 'completed' AND e.renewed = 0`,
+    const fresh = await readCourse(courseId);
+    retrained = await assignWhere(
+      fresh,
+      `SELECT DISTINCT e.learner_id FROM enrollments e JOIN learners l ON l.id = e.learner_id AND l.active = 1
+        WHERE e.course_id = ? AND e.status = 'completed' AND e.renewed = 0 AND ${NO_OPEN}`,
       [courseId],
+      `Version ${version} published`,
     );
-    for (const e of done) {
-      await run("UPDATE enrollments SET renewed = 1 WHERE id = ?", [e.id]);
-      if (await openEnrollment(courseId, e.learner_id)) continue;
-      await createEnrollment(courseId, e.learner_id, version, { due_days: (await readCourse(courseId)).due_days, reason: `Version ${version} published` });
-      retrained++;
-    }
+    await run("UPDATE enrollments SET renewed = 1 WHERE course_id = ? AND status = 'completed' AND renewed = 0", [courseId]);
   }
   const assigned = await syncCourse(courseId);
   return { version, assigned: assigned + retrained };
@@ -255,13 +253,6 @@ export async function readSnapshot(courseId: string, version: number): Promise<S
 }
 
 // ── Assignments ───────────────────────────────────────────────────────
-
-async function openEnrollment(courseId: string, learnerId: string) {
-  return get<EnrollmentRow>(
-    "SELECT * FROM enrollments WHERE course_id = ? AND learner_id = ? AND status IN ('assigned', 'in_progress') LIMIT 1",
-    [courseId, learnerId],
-  );
-}
 
 export async function logActivity(enrollmentId: string, kind: string, detail = ""): Promise<void> {
   await run("INSERT INTO activity (enrollment_id, kind, detail) VALUES (?, ?, ?)", [enrollmentId, kind, detail]);
@@ -283,6 +274,35 @@ export async function createEnrollment(
   return (await get<EnrollmentRow>("SELECT * FROM enrollments WHERE id = ?", [id]))!;
 }
 
+/** No open assignment of the same course for the same person (`e` is the outer row). */
+const NO_OPEN = `NOT EXISTS (SELECT 1 FROM enrollments o WHERE o.course_id = e.course_id AND o.learner_id = e.learner_id
+  AND o.status IN ('assigned', 'in_progress'))`;
+
+/**
+ * Assign a published course to every person `learnersSql` selects (one
+ * `learner_id` column), and log each assignment. Two statements whatever the
+ * number of people: the database caps the queries one request may run, so a
+ * loop of inserts per person stops part-way on a large import.
+ */
+async function assignWhere(course: CourseRow, learnersSql: string, args: unknown[], reason: string): Promise<number> {
+  if (!course.published_version || course.archived) return 0;
+  const due = course.due_days > 0 ? sqlTime(addDays(new Date(), course.due_days)) : null;
+  const r = await run(
+    `INSERT INTO enrollments (id, course_id, learner_id, course_version, token, due_at)
+     SELECT lower(hex(randomblob(16))), ?, x.learner_id, ?, lower(hex(randomblob(24))), ? FROM (${learnersSql}) x`,
+    [course.id, course.published_version, due, ...args],
+  );
+  if (!r.changes) return 0;
+  // Every assignment is logged when made, so the ones without a log entry are exactly these.
+  await run(
+    `INSERT INTO activity (enrollment_id, kind, detail)
+     SELECT e.id, 'assigned', ? FROM enrollments e
+      WHERE e.course_id = ? AND NOT EXISTS (SELECT 1 FROM activity a WHERE a.enrollment_id = e.id)`,
+    [reason, course.id],
+  );
+  return r.changes;
+}
+
 /**
  * Give everyone in the course's groups an assignment they are missing. Returns
  * how many were created. A learner is covered by an open assignment, or by a
@@ -290,8 +310,8 @@ export async function createEnrollment(
  */
 export async function syncCourse(courseId: string): Promise<number> {
   const course = await readCourse(courseId);
-  if (!course.published_version || course.archived) return 0;
-  const missing = await query<{ learner_id: string }>(
+  return assignWhere(
+    course,
     `SELECT DISTINCT lg.learner_id FROM course_groups cg
        JOIN learner_groups lg ON lg.group_id = cg.group_id
        JOIN learners l ON l.id = lg.learner_id AND l.active = 1
@@ -301,21 +321,38 @@ export async function syncCourse(courseId: string): Promise<number> {
             AND (e.status IN ('assigned', 'in_progress')
                  OR (e.status = 'completed' AND e.renewed = 0 AND (e.renew_at IS NULL OR e.renew_at > datetime('now')))))`,
     [courseId],
+    "Required for their group",
   );
-  for (const m of missing) {
-    await createEnrollment(courseId, m.learner_id, course.published_version, { due_days: course.due_days, reason: "Required for their group" });
-  }
-  return missing.length;
 }
 
-/** Bring every published course up to date: renewals due, and new group members. */
+/**
+ * Bring every published course up to date: completions that came due for
+ * renewal are assigned again (whether the person was assigned by group or by
+ * hand), then new members of required groups get theirs. A few statements per
+ * course, never one per person.
+ */
 export async function syncAll(): Promise<number> {
-  const due = await query<{ id: string }>(
-    "SELECT id FROM enrollments WHERE status = 'completed' AND renewed = 0 AND renew_at IS NOT NULL AND renew_at <= datetime('now') LIMIT 500",
-  );
-  for (const e of due) await run("UPDATE enrollments SET renewed = 1 WHERE id = ?", [e.id]);
-  const courses = await query<{ id: string }>("SELECT id FROM courses WHERE published_version IS NOT NULL AND archived = 0");
   let n = 0;
+  const due = await query<{ course_id: string }>(
+    `SELECT DISTINCT course_id FROM enrollments
+      WHERE status = 'completed' AND renewed = 0 AND renew_at IS NOT NULL AND renew_at <= datetime('now')`,
+  );
+  for (const { course_id } of due) {
+    const course = await readCourse(course_id);
+    n += await assignWhere(
+      course,
+      `SELECT DISTINCT e.learner_id FROM enrollments e JOIN learners l ON l.id = e.learner_id AND l.active = 1
+        WHERE e.course_id = ? AND e.status = 'completed' AND e.renewed = 0
+          AND e.renew_at IS NOT NULL AND e.renew_at <= datetime('now') AND ${NO_OPEN}`,
+      [course_id],
+      "Due for renewal",
+    );
+    await run(
+      "UPDATE enrollments SET renewed = 1 WHERE course_id = ? AND status = 'completed' AND renewed = 0 AND renew_at IS NOT NULL AND renew_at <= datetime('now')",
+      [course_id],
+    );
+  }
+  const courses = await query<{ id: string }>("SELECT id FROM courses WHERE published_version IS NOT NULL AND archived = 0");
   for (const c of courses) n += await syncCourse(c.id);
   return n;
 }

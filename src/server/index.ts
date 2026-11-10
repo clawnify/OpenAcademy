@@ -12,6 +12,7 @@ import { attemptsFor, registerLearn } from "./learn.js";
 import { deleteUpload, hasUploads, initUploads, putUpload, serveUpload } from "./uploads.js";
 import { InputError, parseJson, uid } from "./util.js";
 import { readSettings } from "./settings.js";
+import { importPeople } from "./people.js";
 import { SCRIPT_MAX, advanceVideo, mediaKeyForLink, rebookStalled, startAvatarVideo } from "./video.js";
 
 type Bindings = {
@@ -936,10 +937,9 @@ api("post", "/api/learners/import", "Add or update many people at once, matched 
   },
   async (c, input) => {
     const b = input.json;
-    let created = 0;
-    for (const p of b.people) if ((await upsertLearner(p, !!b.replace_groups)).created) created++;
+    const { created, updated } = await importPeople(b.people, !!b.replace_groups);
     const assigned = await syncAll();
-    return ok(c, { created, updated: b.people.length - created, assigned });
+    return ok(c, { created, updated, assigned });
   },
 );
 
@@ -965,11 +965,12 @@ api("patch", "/api/learners/{id}", "Change a person; deactivating cancels their 
     }
     if (b.groups) for (const name of b.groups) await run("INSERT OR IGNORE INTO learner_groups (learner_id, group_id) VALUES (?, ?)", [l.id, await groupByName(name)]);
     if (!active && l.active) {
-      const open = await query<{ id: string }>("SELECT id FROM enrollments WHERE learner_id = ? AND status IN ('assigned', 'in_progress')", [l.id]);
-      for (const e of open) {
-        await run("UPDATE enrollments SET status = 'cancelled' WHERE id = ?", [e.id]);
-        await run("INSERT INTO activity (enrollment_id, kind, detail) VALUES (?, 'cancelled', 'Person deactivated')", [e.id]);
-      }
+      await run(
+        `INSERT INTO activity (enrollment_id, kind, detail)
+         SELECT id, 'cancelled', 'Person deactivated' FROM enrollments WHERE learner_id = ? AND status IN ('assigned', 'in_progress')`,
+        [l.id],
+      );
+      await run("UPDATE enrollments SET status = 'cancelled' WHERE learner_id = ? AND status IN ('assigned', 'in_progress')", [l.id]);
     }
     await syncAll();
     return ok(c, (await presentLearners([(await get<LearnerRow>("SELECT * FROM learners WHERE id = ?", [l.id]))!]))[0]);

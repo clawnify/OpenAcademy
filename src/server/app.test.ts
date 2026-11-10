@@ -5,8 +5,10 @@ import app from "./index";
 
 // The platform's Storage binding over node:sqlite: the real routes and SQL run, no mocks.
 let db: DatabaseSync;
+let queries = 0; // per request, to hold the app under the database's 1,000-queries-per-request cap
 const STORAGE = {
   async query(sql: string, params: unknown[] = []) {
+    queries++;
     const stmt = db.prepare(sql);
     const values = params as (string | number | null)[];
     if (/^\s*(select|with|pragma)/i.test(sql) || /\breturning\b/i.test(sql)) return { rows: stmt.all(...values) };
@@ -256,6 +258,52 @@ describe("new versions and renewals", () => {
     expect(r.body.enrollments[0].status).toBe("cancelled");
     const page = await learner("GET", new URL(r.body.enrollments[0].link).pathname);
     expect(page.html).toContain("withdrawn");
+  });
+});
+
+describe("at scale", () => {
+  it("imports 500 people into a published course in a bounded number of queries", async () => {
+    const { id } = await publishedCourse();
+    const people = Array.from({ length: 500 }, (_, i) => ({
+      name: `Person ${i}`, email: `p${i}@acme.test`, external_id: `E${i}`,
+      groups: [i % 2 ? "warehouse" : "WAREHOUSE", `Site ${i % 7}`],
+    }));
+    queries = 0;
+    const r = await call("POST", "/api/learners/import", { people });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body).toEqual({ created: 500, updated: 0, assigned: 500 });
+    expect(queries).toBeLessThan(150);
+
+    // Group names match regardless of case: one Warehouse group, not three.
+    const groups = (await call("GET", "/api/groups?search=warehouse")).body.groups;
+    expect(groups).toHaveLength(1);
+    expect(groups[0].members).toBe(502);
+
+    // Importing again updates, and assigns nobody twice.
+    const again = await call("POST", "/api/learners/import", { people: people.slice(0, 50).map((p) => ({ ...p, name: `${p.name}!` })) });
+    expect(again.body).toEqual({ created: 0, updated: 50, assigned: 0 });
+    const open = await call("GET", `/api/enrollments?course_id=${id}&status=open&limit=1`);
+    expect(open.body.total).toBe(502);
+  });
+
+  it("retrains everyone on a new version in a bounded number of queries", async () => {
+    const { id } = await publishedCourse();
+    await call("POST", "/api/learners/import", { people: Array.from({ length: 300 }, (_, i) => ({ name: `P${i}`, email: `r${i}@acme.test`, groups: ["Warehouse"] })) });
+    db.exec("UPDATE enrollments SET status = 'completed', completed_at = datetime('now')");
+    queries = 0;
+    const r = await call("POST", `/api/courses/${id}/publish`, { retrain: true });
+    expect(r.body).toEqual({ version: 2, assigned: 302 });
+    expect(queries).toBeLessThan(60);
+  });
+
+  it("renews a person assigned by hand, not only group members", async () => {
+    const { id } = await publishedCourse();
+    const cleo = (await call("GET", "/api/learners?search=cleo")).body.learners[0];
+    await call("POST", `/api/courses/${id}/enrollments`, { learner_ids: [cleo.id] });
+    db.exec(`UPDATE enrollments SET status = 'completed', renew_at = datetime('now', '-1 day') WHERE learner_id = '${cleo.id}'`);
+    expect((await call("POST", "/api/sync")).body.assigned).toBe(1);
+    const mine = await call("GET", `/api/enrollments?course_id=${id}&learner_id=${cleo.id}&status=open`);
+    expect(mine.body.total).toBe(1);
   });
 });
 
