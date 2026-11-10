@@ -1,8 +1,23 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="readme-banner-dark.png" />
+  <img src="readme-banner.png" alt="OpenAcademy: the course editor with a presenter video lesson and its script, and the completion record of one learner" width="100%" />
+</picture>
+
 # OpenAcademy: Training Courses From Your Own Procedures
+
+Turn the procedures, policies and manuals your company already has into training courses: AI drafts the modules, lessons and quizzes from your documents, a presenter you choose reads each video lesson, and you edit everything before it goes out. Assign courses by role or department, everyone takes them from a personal link, and you keep the record of who completed which version, with their score and what they confirmed. An open-source app template provided by [Clawnify.com](https://clawnify.com).
 
 [![Deploy with Clawnify](https://app.clawnify.com/deploy-button.svg)](https://app.clawnify.com/deploy?repo=clawnify/OpenAcademy)
 
-Turn the procedures, policies and manuals your company already has into training courses: AI drafts the modules, lessons and quizzes from your documents, a presenter you choose reads each video lesson, and you edit everything before it goes out. Assign courses by role or department, everyone takes them from a personal link, and you keep the record of who completed which version, with their score and what they confirmed. An open-source app template provided by [Clawnify.com](https://clawnify.com).
+## See it in action
+
+Conceptual UI illustrations of the app's main capabilities, with fictional example data. Open an image to see the details.
+
+| Draft from your documents | Presenter videos |
+| --- | --- |
+| [![The Sources tab with a procedure added and the Draft with AI panel](previews/draft.png)](previews/draft.png) | [![A video lesson marked AI generated, with the presenter's script under it and their recorded consent](previews/presenter.png)](previews/presenter.png) |
+| **Learners** | **Records** |
+| [![A learner's quiz result with the explanation for each answer, on a laptop and a phone](previews/learners.png)](previews/learners.png) | [![The records table with a completed, an in-progress and an overdue person, and one person's logged steps](previews/records.png)](previews/records.png) |
 
 Built with **React + Tailwind** on a **Hono API**, a **SQLite** database and object storage, with a full OpenAPI surface so an agent can drive it.
 

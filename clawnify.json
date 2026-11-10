@@ -13,7 +13,9 @@
   ],
   "template": {
     "displayName": "Training",
-    "category": "Operations"
+    "category": "Operations",
+    "image": "https://raw.githubusercontent.com/clawnify/OpenAcademy/main/readme-banner.png",
+    "enabled": true
   },
   "app": {
     "framework": "react+hono",
@@ -22,14 +24,36 @@
   },
   "api": {
     "public_routes": [
-      { "path": "/learn/**", "methods": ["GET", "HEAD", "POST"] },
-      { "path": "/api/public/media/*", "methods": ["GET", "HEAD"] },
-      { "path": "/api/video/step", "methods": ["POST"] }
+      {
+        "path": "/learn/**",
+        "methods": [
+          "GET",
+          "HEAD",
+          "POST"
+        ]
+      },
+      {
+        "path": "/api/public/media/*",
+        "methods": [
+          "GET",
+          "HEAD"
+        ]
+      },
+      {
+        "path": "/api/video/step",
+        "methods": [
+          "POST"
+        ]
+      }
     ],
-    "server_routes": ["/learn/*"]
+    "server_routes": [
+      "/learn/*"
+    ]
   },
   "env": {
-    "required": ["OPENROUTER_API_KEY"]
+    "required": [
+      "OPENROUTER_API_KEY"
+    ]
   },
   "deploy": {
     "subtitle": "Courses built from your own procedures, assigned by role, with the record of who completed which version.",
@@ -58,5 +82,6 @@
       }
     ]
   },
-  "agent": "agent.md"
+  "agent": "agent.md",
+  "screenshot": "readme-banner.png"
 }

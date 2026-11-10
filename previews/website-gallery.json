@@ -1,0 +1,22 @@
+[
+  {
+    "image": "previews/draft.png",
+    "title": "Draft from your documents",
+    "caption": "Add your documents and draft modules, lessons and quizzes from them. The draft is told never to invent a rule your documents don't contain, and you edit everything before it goes out."
+  },
+  {
+    "image": "previews/presenter.png",
+    "title": "Presenter videos",
+    "caption": "Choose a presenter, write what they say, and make the video. Learners see it marked as AI generated, and nobody's photo is used until their consent is recorded."
+  },
+  {
+    "image": "previews/learners.png",
+    "title": "Learners",
+    "caption": "No accounts. Lessons, quizzes with an explanation for every answer and unlimited retakes, then a confirmation in their own words and a certificate."
+  },
+  {
+    "image": "previews/records.png",
+    "title": "Records",
+    "caption": "Every assignment, lesson, attempt and confirmation is recorded with its time. See who is overdue, copy their link, and export the record for an auditor."
+  }
+]
