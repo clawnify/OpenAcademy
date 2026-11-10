@@ -1,0 +1,62 @@
+{
+  "$schema": "https://app.clawnify.com/schema/v1/clawnify.json",
+  "version": 1,
+  "name": "Training",
+  "description": "Turn your own procedures, policies and manuals into training courses: AI drafts the modules, lessons and quizzes from your documents, a presenter you choose reads each video lesson, and every course is published as a version. Assign courses by role or department; everyone takes them from a personal link, and you keep the record of who completed which version and when, ready for an audit.",
+  "icon": "icon.svg",
+  "tags": [
+    "training",
+    "lms",
+    "compliance",
+    "e-learning",
+    "ai-video"
+  ],
+  "template": {
+    "displayName": "Training",
+    "category": "Operations"
+  },
+  "app": {
+    "framework": "react+hono",
+    "database": true,
+    "storage": true
+  },
+  "api": {
+    "public_routes": [
+      { "path": "/learn/**", "methods": ["GET", "HEAD", "POST"] },
+      { "path": "/api/public/media/*", "methods": ["GET", "HEAD"] },
+      { "path": "/api/video/step", "methods": ["POST"] }
+    ],
+    "server_routes": ["/learn/*"]
+  },
+  "env": {
+    "required": ["OPENROUTER_API_KEY"]
+  },
+  "deploy": {
+    "subtitle": "Courses built from your own procedures, assigned by role, with the record of who completed which version.",
+    "prompts": [
+      {
+        "key": "organization_name",
+        "label": "Organisation name",
+        "placeholder": "e.g. Northwind Logistics",
+        "required": true
+      },
+      {
+        "key": "first_course",
+        "label": "What should the first course teach?",
+        "type": "textarea",
+        "placeholder": "e.g. Our goods-receiving procedure for warehouse staff"
+      },
+      {
+        "key": "groups",
+        "label": "Which roles or departments take training?",
+        "placeholder": "e.g. Warehouse, Drivers, Office, Shift leads"
+      },
+      {
+        "key": "language",
+        "label": "Language of the courses",
+        "placeholder": "e.g. English"
+      }
+    ]
+  },
+  "agent": "agent.md"
+}

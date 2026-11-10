@@ -125,6 +125,20 @@ body {
   .stat { @apply text-[2rem] font-semibold leading-none tracking-[-0.02em]; font-variant-numeric: tabular-nums; }
 
   .app-icon { @apply inline-flex items-center justify-center rounded-md bg-accent text-accent-foreground shrink-0; }
+
+  /* Lesson text, as learners read it. */
+  .prose { @apply text-[0.9375rem] leading-relaxed; }
+  .prose h2 { @apply mt-6 mb-2 text-[1.25rem] font-semibold leading-tight; }
+  .prose h3, .prose h4 { @apply mt-5 mb-1.5 text-base font-semibold; }
+  .prose p, .prose ul, .prose ol { @apply mb-3; }
+  .prose ul { @apply list-disc pl-5; }
+  .prose ol { @apply list-decimal pl-5; }
+  .prose li { @apply my-1; }
+  .prose a { @apply underline; }
+  .prose code { @apply rounded-xs bg-muted px-1 text-[0.8125rem]; }
+  .prose blockquote { @apply mb-3 pl-3 text-muted-foreground; box-shadow: inset 2px 0 0 var(--color-border); }
+  .prose hr { @apply my-6 border-border; }
+  .prose > :first-child { @apply mt-0; }
 }
 
 /* ── Sidebar ───────────────────────────────────────────────────────────

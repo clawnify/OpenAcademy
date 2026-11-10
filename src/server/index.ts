@@ -1086,8 +1086,8 @@ app.get("/api/records.csv", async (c) => {
 // ── Overview, sync, settings ──────────────────────────────────────────
 
 async function overviewNumbers() {
-  return (await get<{ courses: number; learners: number; open: number; overdue: number; completed_30d: number; due_7d: number }>(
-    `SELECT (SELECT COUNT(*) FROM courses WHERE published_version IS NOT NULL AND archived = 0) courses,
+  return (await get<{ published_courses: number; learners: number; open: number; overdue: number; completed_30d: number; due_7d: number }>(
+    `SELECT (SELECT COUNT(*) FROM courses WHERE published_version IS NOT NULL AND archived = 0) published_courses,
             (SELECT COUNT(*) FROM learners WHERE active = 1) learners,
             (SELECT COUNT(*) FROM enrollments WHERE status IN ('assigned', 'in_progress')) open,
             (SELECT COUNT(*) FROM enrollments WHERE status IN ('assigned', 'in_progress') AND due_at < datetime('now')) overdue,
