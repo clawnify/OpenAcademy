@@ -15,6 +15,7 @@ import { getVideoJob, speak, startPresenterVideo, videoDownload, type AiEnv } fr
 import { readCourse, touchCourse, type LessonRow } from "./course.js";
 import { putUpload, putUploadFromUrl } from "./uploads.js";
 import { InputError, addDays, linkToken, sqlTime } from "./util.js";
+import { readSettings } from "./settings.js";
 
 export type VideoEnv = AiEnv & QueueEnv;
 
@@ -31,12 +32,6 @@ interface PresenterRow {
   voice_model: string;
   voice: string;
   consent_at: string | null;
-}
-
-interface SettingsRow {
-  voice_model: string;
-  voice: string;
-  avatar_model: string;
 }
 
 /** A link a model provider can fetch a stored file from, for a short while. */
@@ -98,7 +93,7 @@ export async function startAvatarVideo(env: VideoEnv, origin: string, lessonId: 
   if (!presenter.photo_key) throw new InputError(`Add a photo of ${presenter.name} first.`, 400);
   if (!presenter.consent_at) throw new InputError(`Record ${presenter.name}'s consent to an AI presenter made from their photo first.`, 403, "no_consent");
 
-  const settings = (await get<SettingsRow>("SELECT voice_model, voice, avatar_model FROM settings WHERE id = 1"))!;
+  const settings = await readSettings();
   await readCourse(lesson.course_id);
   await run(
     `UPDATE lessons SET presenter_id = ?, video_status = 'voicing', video_source = 'avatar', video_script = ?, video_error = '',

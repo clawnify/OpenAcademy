@@ -17,6 +17,7 @@ import {
 import { serveUpload } from "./uploads.js";
 import { escapeHtml as esc, renderMarkdown } from "../shared/markdown.js";
 import { InputError, parseJson, uid } from "./util.js";
+import { readSettings } from "./settings.js";
 
 // ── Page shell ────────────────────────────────────────────────────────
 
@@ -147,7 +148,7 @@ async function context(token: string): Promise<Ctx | Response> {
   const done = await doneLessons(e.id);
   const { perQuiz } = await courseScore(e, s);
   const passed = new Set(snapshotLessons(s).filter((l) => l.kind === "quiz" && quizPassed(perQuiz.get(l.id), s.course.pass_mark)).map((l) => l.id));
-  const settings = await get<{ organization_name: string }>("SELECT organization_name FROM settings WHERE id = 1");
+  const settings = await readSettings();
   const learner = await get<{ name: string }>("SELECT name FROM learners WHERE id = ?", [e.learner_id]);
   return { e, s, base: `/learn/${token}`, done, passed, orgName: settings?.organization_name ?? "", learnerName: learner?.name ?? "" };
 }
@@ -322,7 +323,7 @@ async function finishPage(c: Ctx): Promise<string> {
 }
 
 async function certificate(c: Ctx): Promise<string> {
-  const signer = (await get<{ certificate_signer: string }>("SELECT certificate_signer FROM settings WHERE id = 1"))?.certificate_signer ?? "";
+  const signer = (await readSettings()).certificate_signer;
   return `<main><div class="page"><div class="card" style="padding:48px 40px;text-align:center">` +
     `<p class="eyebrow">${esc(c.orgName || "Certificate of completion")}</p>` +
     `<h1 style="margin:8px 0 4px">${esc(c.learnerName)}</h1>` +

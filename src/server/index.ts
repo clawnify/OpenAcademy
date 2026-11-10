@@ -11,6 +11,7 @@ import {
 import { attemptsFor, registerLearn } from "./learn.js";
 import { deleteUpload, hasUploads, initUploads, putUpload, serveUpload } from "./uploads.js";
 import { InputError, parseJson, uid } from "./util.js";
+import { readSettings } from "./settings.js";
 import { SCRIPT_MAX, advanceVideo, mediaKeyForLink, rebookStalled, startAvatarVideo } from "./video.js";
 
 type Bindings = {
@@ -470,7 +471,7 @@ api("post", "/api/courses/{id}/draft", "Draft the course outline from its source
     if (has && !b.replace) throw new InputError("The course already has an outline. Send replace: true to draft a new one in its place.", 409, "has_outline");
     const sources = await query<{ title: string; body: string }>("SELECT title, body FROM sources WHERE course_id = ? ORDER BY created_at", [course.id]);
     if (!sources.length) throw new InputError("Add at least one source document first: the course is drafted from them.", 422, "no_sources");
-    const settings = (await get<{ text_model: string }>("SELECT text_model FROM settings WHERE id = 1"))!;
+    const settings = await readSettings();
     const model = await pickTextModel(c.env, settings.text_model);
     const draft = await draftCourse(c.env, model, {
       title: course.title, audience: course.audience, language: course.language, instructions: b.instructions ?? "",
@@ -1122,15 +1123,16 @@ const SettingsShape = z.object({
 }).openapi("Settings");
 
 api("get", "/api/settings", "App settings", { res: SettingsShape.extend({ storage: z.boolean(), ai: z.boolean() }) }, async (c, input) => {
-  const s = await get("SELECT organization_name, text_model, voice_model, voice, avatar_model, certificate_signer FROM settings WHERE id = 1");
+  const s = await readSettings();
   return ok(c, { ...s, storage: hasUploads(), ai: !!c.env.OPENROUTER_API_KEY });
 });
 
 api("put", "/api/settings", "Change app settings (only the fields sent)", { body: SettingsShape.partial(), res: SettingsShape }, async (c, input) => {
   const b = input.json;
   const sets = Object.entries(b).filter(([, v]) => v !== undefined);
+  await readSettings();
   if (sets.length) await run(`UPDATE settings SET ${sets.map(([k]) => `${k} = ?`).join(", ")}, updated_at = datetime('now') WHERE id = 1`, sets.map(([, v]) => (v as string).trim()));
-  return ok(c, await get("SELECT organization_name, text_model, voice_model, voice, avatar_model, certificate_signer FROM settings WHERE id = 1"));
+  return ok(c, await readSettings());
 });
 
 api("get", "/api/models", "Models this workspace's key can use, for the settings pickers", {

@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS settings (
   certificate_signer TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-INSERT OR IGNORE INTO settings (id) VALUES (1);
+-- The single row (id = 1) is created by the app on first read: schema.sql is structure only.
 
 CREATE TABLE IF NOT EXISTS courses (
   id TEXT PRIMARY KEY,
