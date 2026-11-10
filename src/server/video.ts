@@ -16,8 +16,9 @@ import { readCourse, touchCourse, type LessonRow } from "./course.js";
 import { putUpload, putUploadFromUrl } from "./uploads.js";
 import { InputError, addDays, linkToken, sqlTime } from "./util.js";
 import { readSettings } from "./settings.js";
+import { mediaConfig, mediaState } from "./media.js";
 
-export type VideoEnv = AiEnv & QueueEnv;
+export type VideoEnv = AiEnv & QueueEnv & { SERVICES_URL?: string };
 
 /** About three minutes of speech. Longer lessons read better split in two. */
 export const SCRIPT_MAX = 2800;
@@ -124,10 +125,15 @@ export async function startAvatarVideo(env: VideoEnv, origin: string, lessonId: 
   return readLesson(lessonId);
 }
 
-/** One look at a render in progress. Safe to call any number of times, from anywhere. */
+/**
+ * One look at a video in progress: an avatar render, or an upload the media
+ * service is still processing. Safe to call any number of times, from anywhere.
+ */
 export async function advanceVideo(env: VideoEnv, origin: string, lessonId: string, opts: { book: boolean }): Promise<LessonRow> {
   const lesson = await readLesson(lessonId);
-  if (lesson.video_status !== "rendering" || !lesson.video_job_id) return lesson;
+  if (lesson.video_status !== "rendering") return lesson;
+  if (lesson.video_media_uid && !lesson.video_job_id) return advanceUpload(env, origin, lesson, opts);
+  if (!lesson.video_job_id) return lesson;
 
   let job;
   try {
@@ -152,7 +158,7 @@ export async function advanceVideo(env: VideoEnv, origin: string, lessonId: stri
     // Only the render this lesson is still waiting for may land: a second check
     // that raced this one finds the status already changed and writes nothing.
     await run(
-      `UPDATE lessons SET video_status = 'ready', video_key = ?, video_cost = ?, video_error = '', updated_at = datetime('now')
+      `UPDATE lessons SET video_status = 'ready', video_key = ?, video_media_uid = NULL, video_cost = ?, video_error = '', updated_at = datetime('now')
         WHERE id = ? AND video_status = 'rendering' AND video_job_id = ?`,
       [key, job.usage?.cost ?? null, lessonId, lesson.video_job_id],
     );
@@ -172,6 +178,46 @@ export async function advanceVideo(env: VideoEnv, origin: string, lessonId: stri
   }
   if (opts.book) await bookStep(env, origin, lessonId);
   return lesson;
+}
+
+/** An uploaded video becomes playable once the media service has processed it. */
+async function advanceUpload(env: VideoEnv, origin: string, lesson: LessonRow, opts: { book: boolean }): Promise<LessonRow> {
+  const uid = lesson.video_media_uid!;
+  const state = await mediaState(mediaConfig(env), uid);
+  if ("failure" in state) {
+    if (state.failure.error === "not_found") await fail(lesson.id, "The uploaded video is gone from storage. Upload it again.");
+    else if (opts.book) await bookStep(env, origin, lesson.id); // a failed check is not a failed upload
+    return readLesson(lesson.id);
+  }
+  if (state.media.ready) {
+    await run(
+      "UPDATE lessons SET video_status = 'ready', video_error = '', updated_at = datetime('now') WHERE id = ? AND video_status = 'rendering' AND video_media_uid = ?",
+      [lesson.id, uid],
+    );
+    await touchCourse(lesson.course_id);
+    return readLesson(lesson.id);
+  }
+  if (state.media.state === "error") {
+    await fail(lesson.id, state.media.error ? `The video could not be processed: ${state.media.error}` : "The video could not be processed. Try another file.");
+    return readLesson(lesson.id);
+  }
+  if (opts.book) await bookStep(env, origin, lesson.id);
+  return lesson;
+}
+
+/** Start waiting on an upload the browser finished sending to the media service. */
+export async function attachUpload(env: VideoEnv, origin: string, lessonId: string, uid: string): Promise<LessonRow> {
+  const lesson = await readLesson(lessonId);
+  if (lesson.kind !== "video") throw new InputError("Only a video lesson takes a video.");
+  const state = await mediaState(mediaConfig(env), uid);
+  if ("failure" in state) throw new InputError(state.failure.detail, state.failure.error === "not_found" ? 404 : 502, state.failure.error);
+  await run(
+    `UPDATE lessons SET video_media_uid = ?, video_key = NULL, video_source = 'upload', video_status = 'rendering', video_job_id = NULL,
+       video_script = NULL, video_error = '', video_cost = NULL, updated_at = datetime('now') WHERE id = ?`,
+    [uid, lessonId],
+  );
+  await touchCourse(lesson.course_id);
+  return advanceVideo(env, origin, lessonId, { book: true });
 }
 
 /** Renders whose booked step is long overdue (a lost delivery) get booked again. */

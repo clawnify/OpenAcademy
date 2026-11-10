@@ -5,6 +5,8 @@ import { api, type CourseDetail, type Lesson, type Presenter, type Question } fr
 import { renderMarkdown } from "../../shared/markdown";
 import { Avatar, Button, Dialog, Picker } from "./ui";
 import { Notice } from "./layout";
+import { LessonVideo } from "./lesson-video";
+import { sendLessonVideo } from "./video-upload";
 
 const SCRIPT_MAX = 2800;
 
@@ -136,6 +138,7 @@ function VideoBody({ lesson: initial, onChanged }: { lesson: Lesson; onChanged: 
   const [presenterId, setPresenterId] = useState(initial.presenter_id ?? "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
   const file = useRef<HTMLInputElement>(null);
   const script = useAutosave(async (v) => {
     const l = await api.updateLesson(initial.id, { body: v });
@@ -185,13 +188,15 @@ function VideoBody({ lesson: initial, onChanged }: { lesson: Lesson; onChanged: 
   async function uploadFile(f: File) {
     setBusy(true);
     setError("");
+    setProgress(0);
     try {
-      setLesson(await api.uploadVideo(lesson.id, f));
+      setLesson(await sendLessonVideo(lesson.id, f, (sent, total) => setProgress(sent / total)));
       await onChanged();
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
+      setProgress(null);
       if (file.current) file.current.value = "";
     }
   }
@@ -202,18 +207,28 @@ function VideoBody({ lesson: initial, onChanged }: { lesson: Lesson; onChanged: 
   return (
     <div className="space-y-3">
       <div className="relative overflow-hidden rounded-md bg-foreground/90 shadow-raised">
-        {lesson.video.url && !working ? (
+        {(lesson.video.url || lesson.video.stream) && !working && progress === null ? (
           <>
-            <video key={lesson.video.url} src={lesson.video.url} controls playsInline preload="metadata" className="block aspect-video w-full" />
+            <LessonVideo lesson={lesson} />
             {lesson.video.source === "avatar" ? (
               <span className="absolute left-3 top-3 rounded-xs bg-foreground/75 px-2 py-0.5 text-[0.6875rem] font-semibold text-background">AI generated</span>
             ) : null}
           </>
         ) : (
           <div className="flex aspect-video flex-col items-center justify-center gap-3 p-6 text-center text-background">
-            {working ? (
+            {progress !== null ? (
               <>
-                <p className="thinking text-sm font-medium">{lesson.video.status === "voicing" ? "Recording the voice" : "Animating the presenter"}</p>
+                <p className="text-sm font-medium">Uploading <span className="data">{Math.round(progress * 100)}%</span></p>
+                <div className="h-1.5 w-64 overflow-hidden rounded-full bg-background/25">
+                  <div className="h-full bg-background" style={{ width: `${Math.round(progress * 100)}%` }} />
+                </div>
+                <p className="max-w-sm text-xs opacity-75">Keep this page open until the upload finishes.</p>
+              </>
+            ) : working ? (
+              <>
+                <p className="thinking text-sm font-medium">
+                  {lesson.video.status === "voicing" ? "Recording the voice" : lesson.video.source === "upload" ? "Processing the video" : "Animating the presenter"}
+                </p>
                 <p className="max-w-sm text-xs opacity-75">This takes a minute or two. You can leave this page; the video lands here when it's done.</p>
               </>
             ) : (

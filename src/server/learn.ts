@@ -18,6 +18,7 @@ import { serveUpload } from "./uploads.js";
 import { escapeHtml as esc, renderMarkdown } from "../shared/markdown.js";
 import { InputError, parseJson, uid } from "./util.js";
 import { readSettings } from "./settings.js";
+import { mediaConfig, mediaPlayback } from "./media.js";
 
 // ── Page shell ────────────────────────────────────────────────────────
 
@@ -232,7 +233,13 @@ function overview(c: Ctx): string {
   );
 }
 
-function lessonPage(c: Ctx, l: SnapshotLesson, attempt: { answers: Record<string, number[]>; correct: number; total: number } | null): string {
+/** A signed playback link for a media-service video, or "unavailable" when the service said no. */
+type Stream = { hls: string; thumbnail: string } | "unavailable" | null;
+
+// hls.js plays adaptive video where the browser can't (Chrome, Firefox); Safari plays it natively.
+const HLS_SCRIPT = "https://cdn.jsdelivr.net/npm/hls.js@1.7.3/dist/hls.min.js";
+
+function lessonPage(c: Ctx, l: SnapshotLesson, attempt: { answers: Record<string, number[]>; correct: number; total: number } | null, stream: Stream = null): string {
   const mod = c.s.modules.find((m) => m.lessons.some((x) => x.id === l.id))!;
   const head = `<p class="eyebrow">${esc(mod.title)}</p><h1>${esc(l.title)}</h1>`;
   const after = nextLesson({ ...c, done: new Set([...c.done, l.id]) }, l.id);
@@ -277,7 +284,14 @@ function lessonPage(c: Ctx, l: SnapshotLesson, attempt: { answers: Record<string
   let content = "";
   if (l.kind === "video") {
     const label = l.ai_presenter ? `<span class="ai">AI GENERATED</span>` : "";
-    content = `<div class="video">${label}<video id="v" controls playsinline preload="metadata" src="${c.base}/media/${l.id}"></video></div>` +
+    const player = l.video_media
+      ? stream && stream !== "unavailable"
+        ? `<video id="v" controls playsinline preload="metadata" poster="${esc(stream.thumbnail.replace("{time}", "1"))}" data-hls="${esc(stream.hls)}"></video>` +
+          `<script src="${HLS_SCRIPT}"></script>` +
+          `<script>(function(){var v=document.getElementById("v"),u=v.dataset.hls;if(v.canPlayType("application/vnd.apple.mpegurl")){v.src=u;}else if(window.Hls&&Hls.isSupported()){var h=new Hls();h.loadSource(u);h.attachMedia(v);}})();</script>`
+        : `<div style="aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;color:oklch(1 0 0);padding:24px;text-align:center">The video can't be played right now. Reload the page in a minute.</div>`
+      : `<video id="v" controls playsinline preload="metadata" src="${c.base}/media/${l.id}"></video>`;
+    content = `<div class="video">${label}${player}</div>` +
       (l.ai_presenter
         ? `<p class="small">${l.presenter_name ? `${esc(l.presenter_name)} is presented by an AI-generated video.` : "The presenter in this video is AI-generated."}</p>`
         : "") +
@@ -366,7 +380,12 @@ export function registerLearn(app: Hono<any>) {
       );
       if (row) attempt = { answers: parseJson<Record<string, number[]>>(row.answers, {}), correct: row.correct, total: row.total };
     }
-    return html(`${lesson.title} · ${ctx.s.course.title}`, lessonPage(ctx, lesson, attempt));
+    let stream: Stream = null;
+    if (lesson.kind === "video" && lesson.video_media) {
+      const p = await mediaPlayback(mediaConfig(c.env as { SERVICES_URL?: string; CLAWNIFY_TOKEN?: string }), lesson.video_media);
+      stream = "failure" in p ? "unavailable" : p.playback;
+    }
+    return html(`${lesson.title} · ${ctx.s.course.title}`, lessonPage(ctx, lesson, attempt, stream));
   });
 
   app.post("/learn/:token/l/:lesson/done", async (c) => {

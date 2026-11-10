@@ -46,6 +46,7 @@ export interface LessonRow {
   position: number;
   presenter_id: string | null;
   video_key: string | null;
+  video_media_uid: string | null;
   video_source: "upload" | "avatar" | null;
   video_status: "none" | "voicing" | "rendering" | "ready" | "failed";
   video_job_id: string | null;
@@ -109,6 +110,8 @@ export interface SnapshotLesson {
   kind: "text" | "video" | "quiz";
   body: string;
   video_key: string | null;
+  /** A video on the managed media service, played from a signed link made per page view. */
+  video_media: string | null;
   /** True when the video is an AI-generated presenter: learners are told so. */
   ai_presenter: boolean;
   presenter_name: string | null;
@@ -215,6 +218,7 @@ export async function publishCourse(courseId: string, opts: { notes?: string; by
         kind: l.kind,
         body: l.body,
         video_key: l.kind === "video" ? l.video_key : null,
+        video_media: l.kind === "video" ? l.video_media_uid : null,
         ai_presenter: l.kind === "video" && l.video_source === "avatar",
         presenter_name: l.kind === "video" && l.presenter_id ? presenters.get(l.presenter_id) ?? null : null,
         questions: l.kind === "quiz" ? l.questions : [],

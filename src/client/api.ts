@@ -35,7 +35,7 @@ export interface Lesson {
   body: string;
   position: number;
   presenter_id: string | null;
-  video: { status: VideoStatus; source: "upload" | "avatar" | null; error: string; cost: number | null; script_changed: boolean; url: string | null };
+  video: { status: VideoStatus; source: "upload" | "avatar" | null; error: string; cost: number | null; script_changed: boolean; url: string | null; stream: boolean };
   questions: Question[];
 }
 
@@ -200,6 +200,10 @@ export const api = {
   makeVideo: (id: string, presenter_id: string) => request<Lesson>(`/api/lessons/${id}/video/avatar`, json("POST", { presenter_id })),
   removeVideo: (id: string) => request<Lesson>(`/api/lessons/${id}/video`, { method: "DELETE" }),
   uploadVideo: (id: string, file: File) => upload<Lesson>(`/api/lessons/${id}/video/file`, file),
+  openVideoUpload: (id: string, input: { name: string; size: number; duration?: number }) =>
+    request<{ uid: string; upload_url: string }>(`/api/lessons/${id}/video/uploads`, json("POST", input)),
+  attachVideo: (id: string, uid: string) => request<Lesson>(`/api/lessons/${id}/video/media`, json("POST", { uid })),
+  videoPlayback: (id: string) => request<{ hls: string; thumbnail: string }>(`/api/lessons/${id}/video/playback`),
 
   addQuestion: (lessonId: string, q: Omit<Question, "id">) => request<Question>(`/api/lessons/${lessonId}/questions`, json("POST", q)),
   updateQuestion: (id: string, q: Partial<Omit<Question, "id">>) => request<Question>(`/api/questions/${id}`, json("PATCH", q)),

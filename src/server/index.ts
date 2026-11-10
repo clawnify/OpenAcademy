@@ -13,7 +13,8 @@ import { deleteUpload, hasUploads, initUploads, putUpload, serveUpload } from ".
 import { InputError, parseJson, uid } from "./util.js";
 import { readSettings } from "./settings.js";
 import { importPeople } from "./people.js";
-import { SCRIPT_MAX, advanceVideo, mediaKeyForLink, rebookStalled, startAvatarVideo } from "./video.js";
+import { SCRIPT_MAX, advanceVideo, attachUpload, mediaKeyForLink, rebookStalled, startAvatarVideo } from "./video.js";
+import { MEDIA_UID, mediaConfig, mediaPlayback, openMediaUpload } from "./media.js";
 
 type Bindings = {
   DB?: D1Database;
@@ -172,7 +173,9 @@ const Lesson = z.object({
   position: z.number(), presenter_id: z.string().nullable(),
   video: z.object({
     status: z.enum(["none", "voicing", "rendering", "ready", "failed"]), source: z.enum(["upload", "avatar"]).nullable(),
-    error: z.string(), cost: z.number().nullable(), script_changed: z.boolean(), url: z.string().nullable(),
+    error: z.string(), cost: z.number().nullable(), script_changed: z.boolean(),
+    url: z.string().nullable().openapi({ description: "A video file in the app's own storage" }),
+    stream: z.boolean().openapi({ description: "The video is on the media service: get a playback link from GET /api/lessons/{id}/video/playback" }),
   }),
   questions: z.array(Question),
 }).openapi("Lesson");
@@ -195,6 +198,7 @@ function presentLesson(l: LessonRow & { questions?: unknown[] }, base: string) {
       status: l.video_status, source: l.video_source, error: l.video_error, cost: l.video_cost,
       script_changed: l.video_source === "avatar" && l.video_status === "ready" && (l.video_script ?? "").trim() !== l.body.trim(),
       url: l.video_key ? `${base}/api/lessons/${l.id}/video/file?v=${encodeURIComponent(l.video_key.split("/").pop()!)}` : null,
+      stream: !!l.video_media_uid,
     },
     questions: (l.questions ?? []) as never[],
   };
@@ -675,12 +679,58 @@ api("get", "/api/lessons/{id}/video", "The lesson's video state; also moves a re
 
 api("delete", "/api/lessons/{id}/video", "Remove the video from the draft lesson (published versions keep theirs)", { res: Lesson }, async (c, input) => {
   const l = await courseOfLesson(param(c, "id"));
-  await run("UPDATE lessons SET video_key = NULL, video_source = NULL, video_status = 'none', video_job_id = NULL, video_script = NULL, video_error = '', video_cost = NULL WHERE id = ?", [l.id]);
+  await run("UPDATE lessons SET video_key = NULL, video_media_uid = NULL, video_source = NULL, video_status = 'none', video_job_id = NULL, video_script = NULL, video_error = '', video_cost = NULL WHERE id = ?", [l.id]);
   await touchCourse(l.course_id);
   return ok(c, await lessonView(l.id, origin(c)));
 });
 
-const MAX_VIDEO_BYTES = 300 * 1024 * 1024;
+api("post", "/api/lessons/{id}/video/uploads", "Open an upload of a video file of any size (the browser sends it to the media service)", {
+    body: z.object({
+      name: z.string().trim().min(1).max(200),
+      size: z.number().int().positive().max(30 * 1024 ** 3),
+      duration: z.number().positive().max(4 * 3600).optional().openapi({ description: "Seconds, when the browser could read it" }),
+    }),
+    description: "Returns a resumable (tus) upload link. When the upload is done, POST /api/lessons/{id}/video/media with the uid. 503 media_unavailable outside Clawnify: send the file to PUT /api/lessons/{id}/video/file instead (up to 95 MB).",
+  },
+  async (c, input) => {
+    const l = await courseOfLesson(param(c, "id"));
+    if (l.kind !== "video") throw new InputError("Only a video lesson takes a video.");
+    const b = input.json;
+    // Reserve the clip's real length (with room for a short probe), not the 4-hour maximum.
+    const opened = await openMediaUpload(mediaConfig(c.env), b.size, b.name, b.duration ? Math.ceil(b.duration * 1.1 + 30) : undefined);
+    if ("failure" in opened) {
+      return c.json({ error: opened.failure.detail, code: opened.failure.error }, opened.failure.error === "media_unavailable" ? 503 : 422);
+    }
+    return ok(c, { uid: opened.id, upload_url: opened.uploadUrl }, 201);
+  },
+);
+
+api("post", "/api/lessons/{id}/video/media", "Use a finished upload as the lesson's video", {
+    body: z.object({ uid: z.string().regex(MEDIA_UID) }),
+    status: 202,
+    res: Lesson,
+    description: "The media service processes the file for a minute or so; the lesson's video status is `rendering` until it can be played.",
+  },
+  async (c, input) => {
+    const l = await attachUpload(c.env, origin(c), param(c, "id"), input.json.uid);
+    return ok(c, await lessonView(l.id, origin(c)), 202);
+  },
+);
+
+api("get", "/api/lessons/{id}/video/playback", "A short-lived playback link for a video on the media service", {
+    res: z.object({ hls: z.string(), thumbnail: z.string() }),
+  },
+  async (c) => {
+    const l = await courseOfLesson(param(c, "id"));
+    if (!l.video_media_uid) throw new InputError("This lesson's video is not on the media service.", 404);
+    const p = await mediaPlayback(mediaConfig(c.env), l.video_media_uid);
+    if ("failure" in p) throw new InputError(p.failure.detail, p.failure.error === "not_ready" ? 409 : 502, p.failure.error);
+    return ok(c, p.playback);
+  },
+);
+
+/** The direct path: the request passes through the edge, which caps a body at 100 MB on most plans. */
+const MAX_VIDEO_BYTES = 95 * 1024 * 1024;
 
 // Raw upload: the file is the request body. Off the OpenAPI surface (a binary body).
 app.put("/api/lessons/:id/video/file", async (c) => {
@@ -690,7 +740,7 @@ app.put("/api/lessons/:id/video/file", async (c) => {
   if (!/^video\/(mp4|webm|quicktime)$/.test(type)) throw new InputError("Upload an MP4, WebM or MOV video.");
   const size = Number(c.req.header("content-length"));
   if (!Number.isFinite(size) || size <= 0) throw new InputError("The upload has no length.");
-  if (size > MAX_VIDEO_BYTES) throw new InputError("Videos up to 300 MB. Shorter lessons work better for learners anyway.");
+  if (size > MAX_VIDEO_BYTES) throw new InputError("This way of uploading takes videos up to 95 MB. Deployed on Clawnify, the editor sends larger ones to the media service instead.");
   if (!c.req.raw.body) throw new InputError("The upload is empty.");
   const key = `lessons/${l.id}/upload-${Date.now()}.${type === "video/webm" ? "webm" : type === "video/quicktime" ? "mov" : "mp4"}`;
   const fixed = new FixedLengthStream(size);
@@ -698,7 +748,7 @@ app.put("/api/lessons/:id/video/file", async (c) => {
   await putUpload(key, fixed.readable, type);
   await pipe;
   await run(
-    "UPDATE lessons SET video_key = ?, video_source = 'upload', video_status = 'ready', video_job_id = NULL, video_script = NULL, video_error = '', video_cost = NULL, updated_at = datetime('now') WHERE id = ?",
+    "UPDATE lessons SET video_key = ?, video_media_uid = NULL, video_source = 'upload', video_status = 'ready', video_job_id = NULL, video_script = NULL, video_error = '', video_cost = NULL, updated_at = datetime('now') WHERE id = ?",
     [key, l.id],
   );
   await touchCourse(l.course_id);

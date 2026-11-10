@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS lessons (
   body TEXT NOT NULL DEFAULT '',                 -- markdown for a text lesson; the presenter's script for a video
   position INTEGER NOT NULL DEFAULT 0,
   presenter_id TEXT REFERENCES presenters(id) ON DELETE SET NULL,
-  video_key TEXT,
+  video_key TEXT,                                -- a file in the app's own storage (avatar renders, small local uploads)
+  video_media_uid TEXT,                          -- or a video on the managed media service (uploads, any size)
   video_source TEXT CHECK (video_source IN ('upload', 'avatar')),
   video_status TEXT NOT NULL DEFAULT 'none' CHECK (video_status IN ('none', 'voicing', 'rendering', 'ready', 'failed')),
   video_job_id TEXT,

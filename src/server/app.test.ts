@@ -385,6 +385,68 @@ describe("presenter videos", () => {
   });
 });
 
+describe("uploaded videos on the media service", () => {
+  it("opens an upload, waits for processing, publishes, and plays from a signed link", async () => {
+    const UID = "a".repeat(32);
+    let ready = false;
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      if (url === "https://services.clawnify.com/media/uploads") {
+        expect(JSON.parse(String(init!.body))).toMatchObject({ size: 500_000_000, name: "welcome.mp4", max_duration_seconds: 162 });
+        return Response.json({ id: UID, upload_url: "https://upload.example/tus/abc" });
+      }
+      if (url === `https://services.clawnify.com/media/${UID}`) return Response.json({ id: UID, state: ready ? "ready" : "inprogress", ready, progress: 40, duration: 120, error: null });
+      if (url === `https://services.clawnify.com/media/${UID}/playback`) return Response.json({ hls: "https://stream.example/t/manifest/video.m3u8", thumbnail: "https://stream.example/t/thumb.jpg?time={time}s" });
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    const env = { STORAGE, CLAWNIFY_TOKEN: "clw_test" };
+    const req = async (method: string, path: string, body?: unknown, headers: Record<string, string> = HEADERS.user) => {
+      const r = await app.request(`${ORIGIN}${path}`, { method, headers: { "content-type": "application/json", ...headers }, ...(body ? { body: JSON.stringify(body) } : {}) }, env);
+      return { status: r.status, body: (await r.text()) as any };
+    };
+    const j = async (...a: Parameters<typeof req>) => { const r = await req(...a); return { ...r, body: JSON.parse(r.body) }; };
+
+    const c = (await j("POST", "/api/courses", { title: "Onboarding" })).body;
+    const m = (await j("POST", `/api/courses/${c.id}/modules`, { title: "Welcome" })).body;
+    const l = (await j("POST", `/api/modules/${m.id}/lessons`, { title: "Welcome video", kind: "video" })).body;
+
+    const opened = await j("POST", `/api/lessons/${l.id}/video/uploads`, { name: "welcome.mp4", size: 500_000_000, duration: 120 });
+    expect(opened.status).toBe(201);
+    expect(opened.body).toEqual({ uid: UID, upload_url: "https://upload.example/tus/abc" });
+
+    const attached = await j("POST", `/api/lessons/${l.id}/video/media`, { uid: UID });
+    expect(attached.body.video).toMatchObject({ status: "rendering", stream: true, url: null });
+    expect((await j("GET", `/api/courses/${c.id}`)).body.problems[0]).toContain("still being made");
+
+    ready = true;
+    expect((await j("GET", `/api/lessons/${l.id}/video`)).body.video.status).toBe("ready");
+    expect((await j("GET", `/api/lessons/${l.id}/video/playback`)).body.hls).toContain("manifest/video.m3u8");
+
+    await j("POST", "/api/learners", { name: "Ana", email: "ana@x.test", groups: ["All"] });
+    const g = (await j("GET", "/api/groups")).body.groups[0];
+    await j("PUT", `/api/courses/${c.id}/groups`, { group_ids: [g.id] });
+    expect((await j("POST", `/api/courses/${c.id}/publish`, {})).body.version).toBe(1);
+    const link = new URL((await j("GET", `/api/enrollments?course_id=${c.id}`)).body.enrollments[0].link).pathname;
+    const page = await app.request(`${ORIGIN}${link}/l/${l.id}`, {}, env);
+    const html = await page.text();
+    expect(html).toContain('data-hls="https://stream.example/t/manifest/video.m3u8"');
+    expect(html).toContain("hls.js@1.7.3");
+  });
+
+  it("tells the editor to fall back to a direct upload outside Clawnify, capped under the edge's limit", async () => {
+    const c = await call("POST", "/api/courses", { title: "Local" }, "local");
+    const m = await call("POST", `/api/courses/${c.body.id}/modules`, { title: "M" }, "local");
+    const l = await call("POST", `/api/modules/${m.body.id}/lessons`, { title: "V", kind: "video" }, "local");
+    const r = await call("POST", `/api/lessons/${l.body.id}/video/uploads`, { name: "v.mp4", size: 1000 }, "local");
+    expect(r.status).toBe(503);
+    expect(r.body.code).toBe("media_unavailable");
+    const big = await app.request(`${ORIGIN}/api/lessons/${l.body.id}/video/file`, {
+      method: "PUT", headers: { "content-type": "video/mp4", "content-length": String(200 * 1024 * 1024) }, body: "x",
+    }, { STORAGE });
+    expect(big.status).toBe(400);
+    expect(((await big.json()) as { error: string }).error).toContain("95 MB");
+  });
+});
+
 describe("AI draft", () => {
   it("drafts an outline from the sources and keeps only what the editor can hold", async () => {
     const sent: any[] = [];
