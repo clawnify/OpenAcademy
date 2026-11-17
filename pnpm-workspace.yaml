@@ -7,3 +7,4 @@ allowBuilds:
   workerd: true
 minimumReleaseAgeExclude:
   - '@clawnify/services@0.6.0'
+  - '@clawnify/app@0.4.8'
